@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pro FX Simulator: GBP/JPY</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #151924; --border: #262b3d; --text: #d1d4dc; --muted: #8b92a5;
+    --green: #22c55e; --red: #ef4444; --blue: #2962ff; --warn: #f59e0b;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; grid-template-columns: 2.5fr 1fr; }
+  
+  @media (max-width: 1024px) { .container { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 15px; grid-column: 1 / -1; background: var(--panel); border: 1px solid var(--border); padding: 15px 20px; border-radius: 8px; }
+  
+  .brand { font-size: 1.4rem; font-weight: 800; color: white; }
+  .account-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; grid-column: 1 / -1; background: #000; border: 1px solid var(--border); padding: 12px 20px; border-radius: 8px; font-size: 0.95rem; }
+  .account-bar div { display: flex; flex-direction: column; }
+  .account-bar span { font-weight: bold; color: white; font-family: ui-monospace, monospace; font-size: 1.1rem; margin-top: 4px;}
+  
+  .chart-container { position: relative; width: 100%; height: 450px; background: #000; border-radius: 6px; border: 1px solid var(--border); overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  
+  .price-box { display: flex; justify-content: space-between; margin-bottom: 20px; gap: 10px;}
+  .price-col { flex: 1; background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 10px; text-align: center; }
+  .price-col .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .price-col .val { font-size: 1.8rem; font-weight: bold; font-variant-numeric: tabular-nums; margin-top: 5px; transition: color 0.2s;}
+  .val.up { color: var(--green); } .val.down { color: var(--red); }
+
+  .input-group { display: flex; justify-content: space-between; align-items: center; background: #0b0e14; padding: 12px 15px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 10px; }
+  .input-group input { background: transparent; border: none; color: white; font-size: 1.1rem; text-align: right; width: 90px; outline: none; font-weight: bold; }
+  .input-group input::placeholder { color: #475569; font-weight: normal; }
+  
+  .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+  button { padding: 12px; border: none; border-radius: 6px; font-size: 1.1rem; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; }
+  .btn-buy { background: var(--blue); } .btn-buy:hover { background: #1d4ed8; }
+  .btn-sell { background: var(--red); } .btn-sell:hover { background: #dc2626; }
+  .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); font-size: 0.9rem; padding: 8px 12px; }
+  .btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
+  
+  .btn-close { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; }
+  .btn-close:hover { background: #262b3d; color: white; }
+  
+  .full-width { grid-column: 1 / -1; }
+  h3 { margin-top: 0; margin-bottom: 15px; color: white; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px;}
+  
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; text-align: left; }
+  th, td { padding: 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.85rem; text-transform: uppercase; }
+  .profit { color: var(--green); } .loss { color: var(--red); }
+  .empty-state { text-align: center; padding: 20px; color: var(--muted); font-style: italic; }
+
+  #alert-box { display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red); color: #fca5a5; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="brand">🐉 Pro FX Simulator: GBP/JPY</div>
+    <button class="btn-danger" id="btn-reset">Reset Account</button>
+  </header>
+
+  <div class="account-bar">
+    <div>Balance <span id="ui-bal">$10,000.00</span></div>
+    <div>Equity <span id="ui-eq">$10,000.00</span></div>
+    <div>Used Margin <span id="ui-margin">$0.00</span></div>
+    <div>Free Margin <span id="ui-free">$10,000.00</span></div>
+    <div>Margin Level <span id="ui-mlvl">0.00%</span></div>
+    <div>Open PnL <span id="ui-pnl">$0.00</span></div>
+  </div>
+
+  <div id="alert-box">⚠️ MARGIN CALL: Your equity dropped below required margin. All positions closed.</div>
+
+  <div class="panel">
+    <h3>Live Candlestick Chart (M1 Simulation)</h3>
+    <div class="chart-container">
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Order Entry (Leverage 1:100)</h3>
+    
+    <div class="price-box">
+      <div class="price-col">
+        <div class="label">Sell at Bid</div>
+        <div class="val" id="ui-bid">192.495</div>
+      </div>
+      <div class="price-col">
+        <div class="label">Buy at Ask</div>
+        <div class="val" id="ui-ask">192.505</div>
+      </div>
+    </div>
+    
+    <div class="input-group">
+      <span>Lot Size (Volume)</span>
+      <input type="number" id="ui-lots" value="1.0" step="0.1" min="0.1" max="50">
+    </div>
+    <div class="input-group">
+      <span>Take Profit (Price)</span>
+      <input type="number" id="ui-tp" placeholder="Optional" step="0.001">
+    </div>
+    <div class="input-group">
+      <span>Stop Loss (Price)</span>
+      <input type="number" id="ui-sl" placeholder="Optional" step="0.001">
+    </div>
+    
+    <div class="btn-group">
+      <button class="btn-sell" id="btn-sell">Sell</button>
+      <button class="btn-buy" id="btn-buy">Buy</button>
+    </div>
+    <div style="text-align: center; margin-top: 15px; font-size: 0.85rem; color: var(--muted);">
+      Spread: <span id="ui-spread">1.0</span> pips
+    </div>
+  </div>
+
+  <div class="panel full-width">
+    <h3>Active Positions</h3>
+    <div style="overflow-x: auto;">
+      <table id="positions-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Type</th>
+            <th>Lots</th>
+            <th>Entry Price</th>
+            <th>Current Price</th>
+            <th>TP / SL</th>
+            <th>PnL (USD)</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="positions-body">
+          <tr><td colspan="8" class="empty-state">No open positions.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel full-width">
+    <h3>Trade History</h3>
+    <div style="overflow-x: auto;">
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Type</th>
+            <th>Lots</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Reason</th>
+            <th>Final PnL</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="7" class="empty-state">No closed trades yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  // --- STATE ---
+  const INITIAL_BALANCE = 10000;
+  let state = {
+    balance: INITIAL_BALANCE,
+    basePrice: 192.500,
+    spread: 0.010, // 1 pip spread
+    bid: 192.495,
+    ask: 192.505,
+    candles: [], // Store OHLC data
+    currentCandle: null,
+    tickCount: 0,
+    positions: [],
+    closedTrades: [],
+    tradeIdCounter: 1,
+    leverage: 100,
+    usdJpyRate: 150.00 
+  };
+
+  // --- UI ELEMENTS ---
+  const ui = {
+    bal: document.getElementById('ui-bal'), eq: document.getElementById('ui-eq'),
+    margin: document.getElementById('ui-margin'), free: document.getElementById('ui-free'),
+    mlvl: document.getElementById('ui-mlvl'), pnl: document.getElementById('ui-pnl'),
+    bid: document.getElementById('ui-bid'), ask: document.getElementById('ui-ask'),
+    spread: document.getElementById('ui-spread'), lots: document.getElementById('ui-lots'),
+    tp: document.getElementById('ui-tp'), sl: document.getElementById('ui-sl'),
+    posBody: document.getElementById('positions-body'), histBody: document.getElementById('history-body'),
+    btnBuy: document.getElementById('btn-buy'), btnSell: document.getElementById('btn-sell'),
+    btnReset: document.getElementById('btn-reset'), alert: document.getElementById('alert-box'),
+    canvas: document.getElementById('chart')
+  };
+  const ctx = ui.canvas.getContext('2d');
+
+  // --- FORMATTERS ---
+  const money = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+  const priceFmt = (val) => val.toFixed(3); 
+  const getClass = (val) => val > 0 ? 'profit' : (val < 0 ? 'loss' : '');
+
+  // Initialize fake historical candles
+  function initCandles() {
+    state.candles = [];
+    let price = 192.000;
+    for(let i=0; i<50; i++) {
+      let open = price;
+      let close = price + (Math.random() - 0.5) * 0.150;
+      let high = Math.max(open, close) + (Math.random() * 0.080);
+      let low = Math.min(open, close) - (Math.random() * 0.080);
+      state.candles.push({ open, high, low, close });
+      price = close;
+    }
+    state.basePrice = price;
+    createNewCandle();
+  }
+
+  function createNewCandle() {
+    state.currentCandle = {
+      open: state.basePrice, high: state.basePrice,
+      low: state.basePrice, close: state.basePrice
+    };
+    state.candles.push(state.currentCandle);
+    if(state.candles.length > 60) state.candles.shift();
+    state.tickCount = 0;
+  }
+
+  function tickMarket() {
+    // Highly volatile Dragon moves
+    const change = (Math.random() - 0.5) * 0.040; 
+    let oldBase = state.basePrice;
+    state.basePrice += change;
+    
+    // Update Bid/Ask based on spread
+    state.spread = 0.010 + (Math.random() * 0.005); // Variable spread 1.0 to 1.5 pips
+    state.bid = state.basePrice - (state.spread / 2);
+    state.ask = state.basePrice + (state.spread / 2);
+    
+    // Update current candle
+    state.currentCandle.close = state.basePrice;
+    if(state.basePrice > state.currentCandle.high) state.currentCandle.high = state.basePrice;
+    if(state.basePrice < state.currentCandle.low) state.currentCandle.low = state.basePrice;
+    
+    state.tickCount++;
+    if(state.tickCount > 20) createNewCandle(); // New candle every ~10 seconds for fast action
+    
+    // Update UI Prices
+    ui.bid.textContent = priceFmt(state.bid);
+    ui.ask.textContent = priceFmt(state.ask);
+    ui.spread.textContent = (state.spread * 100).toFixed(1);
+    
+    ui.bid.className = `val ${state.bid >= oldBase ? 'up' : 'down'}`;
+    ui.ask.className = `val ${state.ask >= oldBase ? 'up' : 'down'}`;
+
+    checkTriggers();
+    updateAccount();
+    drawChart();
+  }
+
+  function drawChart() {
+    if (ui.canvas.clientWidth === 0) return; 
+    ui.canvas.width = ui.canvas.clientWidth;
+    ui.canvas.height = ui.canvas.clientHeight;
+    const w = ui.canvas.width; const h = ui.canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    
+    let minPrice = Math.min(...state.candles.map(c => c.low)) - 0.050;
+    let maxPrice = Math.max(...state.candles.map(c => c.high)) + 0.050;
+    const range = maxPrice - minPrice || 1;
+    
+    const candleWidth = (w / state.candles.length) * 0.7;
+    const spacing = w / state.candles.length;
+
+    state.candles.forEach((c, i) => {
+      const x = (i * spacing) + (spacing / 2);
+      const yOpen = h - ((c.open - minPrice) / range) * h;
+      const yClose = h - ((c.close - minPrice) / range) * h;
+      const yHigh = h - ((c.high - minPrice) / range) * h;
+      const yLow = h - ((c.low - minPrice) / range) * h;
+      
+      const isGreen = c.close >= c.open;
+      ctx.strokeStyle = isGreen ? '#22c55e' : '#ef4444';
+      ctx.fillStyle = isGreen ? '#22c55e' : '#ef4444';
+      
+      // Draw Wick
+      ctx.beginPath();
+      ctx.moveTo(x, yHigh);
+      ctx.lineTo(x, yLow);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      
+      // Draw Body
+      const bodyY = Math.min(yOpen, yClose);
+      const bodyH = Math.max(Math.abs(yOpen - yClose), 2); // Minimum 2px height
+      ctx.fillRect(x - candleWidth/2, bodyY, candleWidth, bodyH);
+    });
+
+    // Draw current Bid line
+    const yBid = h - ((state.bid - minPrice) / range) * h;
+    ctx.beginPath();
+    ctx.setLineDash([5, 5]);
+    ctx.moveTo(0, yBid);
+    ctx.lineTo(w, yBid);
+    ctx.strokeStyle = '#8b92a5';
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function calculateMargin(lots) {
+    // Margin = (Lots * Contract Size * Price) / Leverage
+    // GBP is roughly 1.25 USD. For simplicity in simulation:
+    // 1 Lot = 100,000 GBP. Margin required = (~$125,000 / 100) = $1,250 per lot.
+    return lots * 1250; 
+  }
+
+  function getPnL(pos) {
+    const pipMultiplier = 100000; 
+    let pnlJPY = 0;
+    // To close a BUY, you must SELL at the BID. To close a SELL, you must BUY at the ASK.
+    if (pos.type === 'BUY') pnlJPY = (state.bid - pos.entry) * pipMultiplier * pos.lots;
+    else pnlJPY = (pos.entry - state.ask) * pipMultiplier * pos.lots;
+    return pnlJPY / state.usdJpyRate;
+  }
+
+  function openTrade(type) {
+    const lots = parseFloat(ui.lots.value);
+    if (isNaN(lots) || lots <= 0) return alert("Invalid lot size.");
+    
+    const requiredMargin = calculateMargin(lots);
+    // Calculate current free margin
+    let currentUsedMargin = state.positions.reduce((sum, p) => sum + calculateMargin(p.lots), 0);
+    let floatingPnL = state.positions.reduce((sum, p) => sum + getPnL(p), 0);
+    let equity = state.balance + floatingPnL;
+    let freeMargin = equity - currentUsedMargin;
+
+    if (requiredMargin > freeMargin) return alert("Not enough Free Margin to open this trade.");
+
+    const entryPrice = type === 'BUY' ? state.ask : state.bid;
+    const tpVal = parseFloat(ui.tp.value);
+    const slVal = parseFloat(ui.sl.value);
+    
+    state.positions.push({
+      id: state.tradeIdCounter++, type: type, lots: lots, entry: entryPrice,
+      tp: isNaN(tpVal) ? null : tpVal, sl: isNaN(slVal) ? null : slVal
+    });
+    
+    ui.tp.value = ''; ui.sl.value = '';
+    updateAccount();
+  }
+
+  function closeTrade(id, reason = "Manual") {
+    const index = state.positions.findIndex(p => p.id === id);
+    if (index === -1) return;
+    const pos = state.positions[index];
+    const finalPnL = getPnL(pos);
+    const exitPrice = pos.type === 'BUY' ? state.bid : state.ask;
+    
+    state.balance += finalPnL;
+    state.closedTrades.unshift({ ...pos, exit: exitPrice, pnl: finalPnL, reason: reason });
+    state.positions.splice(index, 1);
+    updateAccount(); renderHistory();
+  }
+
+  function checkTriggers() {
+    for (let i = state.positions.length - 1; i >= 0; i--) {
+      const pos = state.positions[i];
+      if (pos.type === 'BUY') {
+        if (pos.tp && state.bid >= pos.tp) closeTrade(pos.id, "Take Profit");
+        else if (pos.sl && state.bid <= pos.sl) closeTrade(pos.id, "Stop Loss");
+      } else {
+        if (pos.tp && state.ask <= pos.tp) closeTrade(pos.id, "Take Profit");
+        else if (pos.sl && state.ask >= pos.sl) closeTrade(pos.id, "Stop Loss");
+      }
+    }
+  }
+
+  function updateAccount() {
+    let totalPnL = 0;
+    let usedMargin = 0;
+    ui.posBody.innerHTML = '';
+    
+    if (state.positions.length === 0) {
+      ui.posBody.innerHTML = '<tr><td colspan="8" class="empty-state">No open positions.</td></tr>';
+    } else {
+      state.positions.forEach(pos => {
+        const pnl = getPnL(pos);
+        totalPnL += pnl;
+        usedMargin += calculateMargin(pos.lots);
+        const currentClosePrice = pos.type === 'BUY' ? state.bid : state.ask;
+        const tpText = pos.tp ? priceFmt(pos.tp) : '-';
+        const slText = pos.sl ? priceFmt(pos.sl) : '-';
+        
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>#${pos.id}</td>
+          <td style="color: ${pos.type === 'BUY' ? 'var(--blue)' : 'var(--red)'}; font-weight: bold;">${pos.type}</td>
+          <td>${pos.lots}</td>
+          <td>${priceFmt(pos.entry)}</td>
+          <td>${priceFmt(currentClosePrice)}</td>
+          <td style="font-size: 0.85rem; color: var(--muted);">${tpText} / ${slText}</td>
+          <td class="${getClass(pnl)} font-weight: bold;">${money(pnl)}</td>
+          <td><button class="btn-close" data-id="${pos.id}">Close</button></td>
+        `;
+        ui.posBody.appendChild(tr);
+      });
+      document.querySelectorAll('.btn-close').forEach(btn => {
+        btn.addEventListener('click', (e) => closeTrade(parseInt(e.target.getAttribute('data-id'))));
+      });
+    }
+    
+    const equity = state.balance + totalPnL;
+    const freeMargin = equity - usedMargin;
+    const marginLevel = usedMargin === 0 ? 0 : (equity / usedMargin) * 100;
+    
+    ui.bal.textContent = money(state.balance);
+    ui.eq.textContent = money(equity);
+    ui.pnl.textContent = money(totalPnL);
+    ui.pnl.className = getClass(totalPnL);
+    ui.margin.textContent = money(usedMargin);
+    ui.free.textContent = money(freeMargin);
+    ui.mlvl.textContent = usedMargin === 0 ? "—" : marginLevel.toFixed(1) + "%";
+
+    // MARGIN CALL LOGIC (Stop Out Level at 50%)
+    if (usedMargin > 0 && marginLevel < 50) {
+        ui.alert.style.display = "block";
+        const allIds = state.positions.map(p => p.id);
+        allIds.forEach(id => closeTrade(id, "MARGIN CALL"));
+        setTimeout(() => ui.alert.style.display = "none", 5000);
+    }
+  }
+
+  function renderHistory() {
+    ui.histBody.innerHTML = '';
+    if (state.closedTrades.length === 0) return;
+    state.closedTrades.forEach(trade => {
+      const reasonTag = trade.reason !== "Manual" ? ` <span style="font-size: 0.75rem; background: #334155; padding: 2px 6px; border-radius: 4px;">${trade.reason}</span>` : '';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>#${trade.id}</td>
+        <td style="color: ${trade.type === 'BUY' ? 'var(--blue)' : 'var(--red)'}; font-weight: bold;">${trade.type}</td>
+        <td>${trade.lots}</td>
+        <td>${priceFmt(trade.entry)}</td>
+        <td>${priceFmt(trade.exit)}</td>
+        <td>${reasonTag}</td>
+        <td class="${getClass(trade.pnl)}" style="font-weight: bold;">${money(trade.pnl)}</td>
+      `;
+      ui.histBody.appendChild(tr);
+    });
+  }
+
+  ui.btnBuy.addEventListener('click', () => openTrade('BUY'));
+  ui.btnSell.addEventListener('click', () => openTrade('SELL'));
+  ui.btnReset.addEventListener('click', () => {
+    if(confirm("Wipe account and restart with $10,000?")) {
+      state.balance = INITIAL_BALANCE; state.positions = []; state.closedTrades = [];
+      updateAccount(); renderHistory();
+    }
+  });
+
+  initCandles();
+  setInterval(tickMarket, 400); // 400ms tick for active market illusion
+  window.addEventListener('resize', drawChart);
+  setTimeout(drawChart, 100); 
+});
+</script>
+</body>
+</html>
