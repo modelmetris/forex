@@ -19,7 +19,9 @@
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
   header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 15px; grid-column: 1 / -1; background: var(--panel); border: 1px solid var(--border); padding: 15px 20px; border-radius: 8px; }
   
-  .brand { font-size: 1.4rem; font-weight: 800; color: white; }
+  .brand { font-size: 1.4rem; font-weight: 800; color: white; display: flex; align-items: center; gap: 15px; }
+  .sim-clock { font-size: 0.9rem; color: #67e8f9; font-family: ui-monospace, monospace; background: rgba(6, 182, 212, 0.1); padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(6, 182, 212, 0.3); }
+  
   .account-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; grid-column: 1 / -1; background: #000; border: 1px solid var(--border); padding: 12px 20px; border-radius: 8px; font-size: 0.95rem; }
   .account-bar div { display: flex; flex-direction: column; }
   .account-bar span { font-weight: bold; color: white; font-family: ui-monospace, monospace; font-size: 1.1rem; margin-top: 4px;}
@@ -69,7 +71,10 @@
 
 <div class="container">
   <header>
-    <div class="brand">🐉 Pro FX Simulator: GBP/JPY</div>
+    <div class="brand">
+      🐉 Pro FX Simulator 
+      <div class="sim-clock" id="ui-clock">Loading Time...</div>
+    </div>
     <button class="btn-danger" id="btn-reset">Reset Account</button>
   </header>
 
@@ -137,9 +142,9 @@
       <table id="positions-table">
         <thead>
           <tr>
-            <th>ID</th>
             <th>Type</th>
             <th>Lots</th>
+            <th>Entry Time</th>
             <th>Entry Price</th>
             <th>Current Price</th>
             <th>TP / SL</th>
@@ -160,9 +165,10 @@
       <table id="history-table">
         <thead>
           <tr>
-            <th>ID</th>
             <th>Type</th>
             <th>Lots</th>
+            <th>Entry Time</th>
+            <th>Exit Time</th>
             <th>Entry</th>
             <th>Exit</th>
             <th>Reason</th>
@@ -170,7 +176,7 @@
           </tr>
         </thead>
         <tbody id="history-body">
-          <tr><td colspan="7" class="empty-state">No closed trades yet.</td></tr>
+          <tr><td colspan="8" class="empty-state">No closed trades yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -182,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- STATE ---
   const INITIAL_BALANCE = 10000;
   const STORAGE_KEY = 'pro_fx_simulator_data';
+  const MINUTE_MS = 60000; 
   
   let state = {
     balance: INITIAL_BALANCE,
@@ -197,7 +204,8 @@ document.addEventListener("DOMContentLoaded", () => {
     tradeIdCounter: 1,
     leverage: 100,
     usdJpyRate: 150.00,
-    indicators: { sma: false, bb: false }
+    indicators: { sma: false, bb: false },
+    simTime: new Date().getTime() // Tracks simulated time
   };
 
   // --- LOCAL STORAGE LOGIC ---
@@ -210,6 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
         state.positions = parsed.positions || [];
         state.closedTrades = parsed.closedTrades || [];
         state.tradeIdCounter = parsed.tradeIdCounter || 1;
+        state.simTime = parsed.simTime || new Date().getTime();
       } catch (e) {
         console.error("Could not load saved data", e);
       }
@@ -221,7 +230,8 @@ document.addEventListener("DOMContentLoaded", () => {
       balance: state.balance,
       positions: state.positions,
       closedTrades: state.closedTrades,
-      tradeIdCounter: state.tradeIdCounter
+      tradeIdCounter: state.tradeIdCounter,
+      simTime: state.simTime
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
   }
@@ -241,7 +251,8 @@ document.addEventListener("DOMContentLoaded", () => {
     btnBuy: document.getElementById('btn-buy'), btnSell: document.getElementById('btn-sell'),
     btnReset: document.getElementById('btn-reset'), alert: document.getElementById('alert-box'),
     canvas: document.getElementById('chart'),
-    btnSma: document.getElementById('btn-sma'), btnBb: document.getElementById('btn-bb')
+    btnSma: document.getElementById('btn-sma'), btnBb: document.getElementById('btn-bb'),
+    clock: document.getElementById('ui-clock')
   };
   const ctx = ui.canvas.getContext('2d');
 
@@ -249,31 +260,49 @@ document.addEventListener("DOMContentLoaded", () => {
   const money = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const priceFmt = (val) => val.toFixed(3); 
   const getClass = (val) => val > 0 ? 'profit' : (val < 0 ? 'loss' : '');
+  
+  const dateFmt = (ms) => {
+    const d = new Date(ms);
+    return `${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+  };
+  
+  const timeOnlyFmt = (ms) => {
+    const d = new Date(ms);
+    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+  };
 
   // Initialize fake historical candles
   function initCandles() {
     state.candles = [];
     let price = 192.000;
+    let baseTime = state.simTime - (50 * MINUTE_MS); // Backdate 50 minutes
+    
     for(let i=0; i<50; i++) {
       let open = price;
       let close = price + (Math.random() - 0.5) * 0.150;
       let high = Math.max(open, close) + (Math.random() * 0.080);
       let low = Math.min(open, close) - (Math.random() * 0.080);
-      state.candles.push({ open, high, low, close });
+      state.candles.push({ open, high, low, close, time: baseTime });
       price = close;
+      baseTime += MINUTE_MS;
     }
     state.basePrice = price;
     createNewCandle();
   }
 
   function createNewCandle() {
+    state.simTime += MINUTE_MS; // Advance simulation time by 1 minute
+    ui.clock.textContent = dateFmt(state.simTime); // Update clock UI
+    
     state.currentCandle = {
       open: state.basePrice, high: state.basePrice,
-      low: state.basePrice, close: state.basePrice
+      low: state.basePrice, close: state.basePrice,
+      time: state.simTime
     };
     state.candles.push(state.currentCandle);
     if(state.candles.length > 60) state.candles.shift();
     state.tickCount = 0;
+    saveState();
   }
 
   function tickMarket() {
@@ -311,6 +340,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const w = ui.canvas.width; const h = ui.canvas.height;
     ctx.clearRect(0, 0, w, h);
     
+    // Leave 20px at the bottom for the time labels
+    const chartH = h - 25; 
+    
     let minPrice = Math.min(...state.candles.map(c => c.low)) - 0.050;
     let maxPrice = Math.max(...state.candles.map(c => c.high)) + 0.050;
     const range = maxPrice - minPrice || 1;
@@ -332,7 +364,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         let sma = sum / period;
         const x = (i * spacing) + (spacing / 2);
-        smaPoints.push({ x: x, y: h - ((sma - minPrice) / range) * h });
+        smaPoints.push({ x: x, y: chartH - ((sma - minPrice) / range) * chartH });
 
         if (state.indicators.bb) {
           let sumSq = 0;
@@ -340,8 +372,8 @@ document.addEventListener("DOMContentLoaded", () => {
             sumSq += Math.pow(state.candles[i - j].close - sma, 2);
           }
           let sd = Math.sqrt(sumSq / period);
-          upperBands.push({ x: x, y: h - (((sma + (sd * 2)) - minPrice) / range) * h });
-          lowerBands.push({ x: x, y: h - (((sma - (sd * 2)) - minPrice) / range) * h });
+          upperBands.push({ x: x, y: chartH - (((sma + (sd * 2)) - minPrice) / range) * chartH });
+          lowerBands.push({ x: x, y: chartH - (((sma - (sd * 2)) - minPrice) / range) * chartH });
         }
       }
 
@@ -366,13 +398,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // Draw Candles
+    // Draw Candles & X-Axis Time Labels
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    
     state.candles.forEach((c, i) => {
       const x = (i * spacing) + (spacing / 2);
-      const yOpen = h - ((c.open - minPrice) / range) * h;
-      const yClose = h - ((c.close - minPrice) / range) * h;
-      const yHigh = h - ((c.high - minPrice) / range) * h;
-      const yLow = h - ((c.low - minPrice) / range) * h;
+      const yOpen = chartH - ((c.open - minPrice) / range) * chartH;
+      const yClose = chartH - ((c.close - minPrice) / range) * chartH;
+      const yHigh = chartH - ((c.high - minPrice) / range) * chartH;
+      const yLow = chartH - ((c.low - minPrice) / range) * chartH;
       
       const isGreen = c.close >= c.open;
       ctx.strokeStyle = isGreen ? '#22c55e' : '#ef4444';
@@ -387,9 +422,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const bodyY = Math.min(yOpen, yClose);
       const bodyH = Math.max(Math.abs(yOpen - yClose), 2);
       ctx.fillRect(x - candleWidth/2, bodyY, candleWidth, bodyH);
+      
+      // X-Axis Time Label every 10 candles or on the very last candle
+      if (i % 10 === 0 || i === state.candles.length - 1) {
+          ctx.fillStyle = '#8b92a5';
+          ctx.fillText(timeOnlyFmt(c.time), x, h - 5);
+      }
     });
 
-    const yBid = h - ((state.bid - minPrice) / range) * h;
+    const yBid = chartH - ((state.bid - minPrice) / range) * chartH;
     ctx.beginPath();
     ctx.setLineDash([5, 5]);
     ctx.moveTo(0, yBid);
@@ -429,12 +470,13 @@ document.addEventListener("DOMContentLoaded", () => {
     
     state.positions.push({
       id: state.tradeIdCounter++, type: type, lots: lots, entry: entryPrice,
-      tp: isNaN(tpVal) ? null : tpVal, sl: isNaN(slVal) ? null : slVal
+      tp: isNaN(tpVal) ? null : tpVal, sl: isNaN(slVal) ? null : slVal,
+      openTime: state.simTime
     });
     
     ui.tp.value = ''; ui.sl.value = '';
     
-    saveState(); // Save progress
+    saveState(); 
     updateAccount();
   }
 
@@ -446,10 +488,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const exitPrice = pos.type === 'BUY' ? state.bid : state.ask;
     
     state.balance += finalPnL;
-    state.closedTrades.unshift({ ...pos, exit: exitPrice, pnl: finalPnL, reason: reason });
+    state.closedTrades.unshift({ 
+      ...pos, exit: exitPrice, pnl: finalPnL, reason: reason, closeTime: state.simTime 
+    });
     state.positions.splice(index, 1);
     
-    saveState(); // Save progress
+    saveState(); 
     updateAccount(); renderHistory();
   }
 
@@ -484,9 +528,9 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>#${pos.id}</td>
           <td style="color: ${pos.type === 'BUY' ? 'var(--blue)' : 'var(--red)'}; font-weight: bold;">${pos.type}</td>
           <td>${pos.lots}</td>
+          <td style="color: var(--muted); font-size: 0.85rem;">${dateFmt(pos.openTime)}</td>
           <td>${priceFmt(pos.entry)}</td>
           <td>${priceFmt(currentClosePrice)}</td>
           <td style="font-size: 0.85rem; color: var(--muted);">${tpText} / ${slText}</td>
@@ -527,9 +571,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const reasonTag = trade.reason !== "Manual" ? ` <span style="font-size: 0.75rem; background: #334155; padding: 2px 6px; border-radius: 4px;">${trade.reason}</span>` : '';
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>#${trade.id}</td>
         <td style="color: ${trade.type === 'BUY' ? 'var(--blue)' : 'var(--red)'}; font-weight: bold;">${trade.type}</td>
         <td>${trade.lots}</td>
+        <td style="color: var(--muted); font-size: 0.85rem;">${dateFmt(trade.openTime)}</td>
+        <td style="color: var(--muted); font-size: 0.85rem;">${dateFmt(trade.closeTime)}</td>
         <td>${priceFmt(trade.entry)}</td>
         <td>${priceFmt(trade.exit)}</td>
         <td>${reasonTag}</td>
@@ -545,7 +590,8 @@ document.addEventListener("DOMContentLoaded", () => {
   ui.btnReset.addEventListener('click', () => {
     if(confirm("Wipe account and restart with $10,000?")) {
       state.balance = INITIAL_BALANCE; state.positions = []; state.closedTrades = [];
-      saveState(); // Clear local storage progress
+      state.simTime = new Date().getTime(); // Reset time to current real-world time
+      saveState(); 
       updateAccount(); renderHistory();
     }
   });
@@ -561,9 +607,9 @@ document.addEventListener("DOMContentLoaded", () => {
     drawChart();
   });
 
+  ui.clock.textContent = dateFmt(state.simTime);
   initCandles();
   
-  // Render previously loaded state immediately
   updateAccount();
   renderHistory();
   
