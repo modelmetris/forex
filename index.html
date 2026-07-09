@@ -193,9 +193,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let state = {
     balance: INITIAL_BALANCE,
     basePrice: 192.500,
-    spread: 0.010, 
-    bid: 192.495,
-    ask: 192.505,
+    spread: 0.015, 
+    bid: 192.492,
+    ask: 192.508,
     candles: [], 
     currentCandle: null,
     tickCount: 0,
@@ -205,7 +205,9 @@ document.addEventListener("DOMContentLoaded", () => {
     leverage: 100,
     usdJpyRate: 150.00,
     indicators: { sma: false, bb: false },
-    simTime: new Date().getTime() // Tracks simulated time
+    simTime: new Date().getTime(),
+    trend: 0,
+    trendTicks: 0
   };
 
   // --- LOCAL STORAGE LOGIC ---
@@ -236,7 +238,6 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
   }
 
-  // Load saved data immediately
   loadState();
 
   // --- UI ELEMENTS ---
@@ -271,17 +272,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
   };
 
-  // Initialize fake historical candles
+  // Initialize fake historical candles with more realistic GBPJPY swings
   function initCandles() {
     state.candles = [];
-    let price = 192.000;
-    let baseTime = state.simTime - (50 * MINUTE_MS); // Backdate 50 minutes
+    let price = 191.500;
+    let baseTime = state.simTime - (50 * MINUTE_MS); 
     
+    let currentHistTrend = 0;
     for(let i=0; i<50; i++) {
       let open = price;
-      let close = price + (Math.random() - 0.5) * 0.150;
-      let high = Math.max(open, close) + (Math.random() * 0.080);
-      let low = Math.min(open, close) - (Math.random() * 0.080);
+      // Occasionally shift the trend dramatically
+      if(Math.random() > 0.7) currentHistTrend = (Math.random() - 0.5) * 0.300; 
+      
+      let close = price + currentHistTrend + ((Math.random() - 0.5) * 0.150);
+      let high = Math.max(open, close) + (Math.random() * 0.150);
+      let low = Math.min(open, close) - (Math.random() * 0.150);
+      
       state.candles.push({ open, high, low, close, time: baseTime });
       price = close;
       baseTime += MINUTE_MS;
@@ -291,8 +297,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function createNewCandle() {
-    state.simTime += MINUTE_MS; // Advance simulation time by 1 minute
-    ui.clock.textContent = dateFmt(state.simTime); // Update clock UI
+    state.simTime += MINUTE_MS; 
+    ui.clock.textContent = dateFmt(state.simTime); 
     
     state.currentCandle = {
       open: state.basePrice, high: state.basePrice,
@@ -305,12 +311,27 @@ document.addEventListener("DOMContentLoaded", () => {
     saveState();
   }
 
+  // UPDATED MARKET LOGIC - Realistic Volatility & Momentum
   function tickMarket() {
-    const change = (Math.random() - 0.5) * 0.040; 
+    // 1. Calculate Momentum/Trend
+    if (state.trendTicks <= 0) {
+      // Create a new direction bias (up to 6 pips per tick bias)
+      state.trend = (Math.random() - 0.5) * 0.060; 
+      // Trend lasts between 20 and 80 ticks before reversing or stalling
+      state.trendTicks = Math.floor(Math.random() * 60) + 20; 
+    }
+    state.trendTicks--;
+
+    // 2. Add Base Volatility + Trend
+    const volatility = 0.090; // Increased random noise (jumps up to 9 pips)
+    const randomSpike = (Math.random() - 0.5) * volatility;
+    const change = randomSpike + state.trend;
+    
     let oldBase = state.basePrice;
     state.basePrice += change;
     
-    state.spread = 0.010 + (Math.random() * 0.005); 
+    // Simulate realistic floating spread for a volatile pair
+    state.spread = 0.015 + (Math.random() * 0.015); 
     state.bid = state.basePrice - (state.spread / 2);
     state.ask = state.basePrice + (state.spread / 2);
     
@@ -340,17 +361,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const w = ui.canvas.width; const h = ui.canvas.height;
     ctx.clearRect(0, 0, w, h);
     
-    // Leave 20px at the bottom for the time labels
     const chartH = h - 25; 
     
-    let minPrice = Math.min(...state.candles.map(c => c.low)) - 0.050;
-    let maxPrice = Math.max(...state.candles.map(c => c.high)) + 0.050;
+    // Dynamic scaling based on the new wilder prices
+    let minPrice = Math.min(...state.candles.map(c => c.low)) - 0.100;
+    let maxPrice = Math.max(...state.candles.map(c => c.high)) + 0.100;
     const range = maxPrice - minPrice || 1;
     
     const candleWidth = (w / state.candles.length) * 0.7;
     const spacing = w / state.candles.length;
 
-    // Draw Indicators (SMA and Bollinger Bands)
+    // Draw Indicators 
     if (state.indicators.sma || state.indicators.bb) {
       const period = 10;
       let smaPoints = [];
@@ -423,7 +444,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const bodyH = Math.max(Math.abs(yOpen - yClose), 2);
       ctx.fillRect(x - candleWidth/2, bodyY, candleWidth, bodyH);
       
-      // X-Axis Time Label every 10 candles or on the very last candle
       if (i % 10 === 0 || i === state.candles.length - 1) {
           ctx.fillStyle = '#8b92a5';
           ctx.fillText(timeOnlyFmt(c.time), x, h - 5);
@@ -440,9 +460,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.setLineDash([]);
   }
 
-  function calculateMargin(lots) {
-    return lots * 1250; 
-  }
+  function calculateMargin(lots) { return lots * 1250; }
 
   function getPnL(pos) {
     const pipMultiplier = 100000; 
@@ -475,7 +493,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     
     ui.tp.value = ''; ui.sl.value = '';
-    
     saveState(); 
     updateAccount();
   }
@@ -590,7 +607,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ui.btnReset.addEventListener('click', () => {
     if(confirm("Wipe account and restart with $10,000?")) {
       state.balance = INITIAL_BALANCE; state.positions = []; state.closedTrades = [];
-      state.simTime = new Date().getTime(); // Reset time to current real-world time
+      state.simTime = new Date().getTime(); 
       saveState(); 
       updateAccount(); renderHistory();
     }
